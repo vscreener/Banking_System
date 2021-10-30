@@ -1,0 +1,203 @@
+# Write your code here
+import random
+import sqlite3
+
+# Database is a dictionary where card accounts and PINs are kept.
+conn = sqlite3.connect('card.s3db')
+cur = conn.cursor()
+# cur.execute("DROP TABLE card")
+cur.execute(
+    "CREATE TABLE IF NOT EXISTS card (id INTEGER PRIMARY KEY, number TEXT, pin TEXT, balance INTEGER DEFAULT 0)")
+
+
+class CardPinGenerator():
+    def __init__(self):
+        # IIN is the stable number that will always be 400000 in this project.
+        IIN = 400000
+        # numof indicates the number of numbers required after IIN - constant, 10 numbers. However, we will use 9 to generate checksum number.
+        numof = 9
+        # postIIN are the numbers that come after IIN, which is always 400000. We generate a list of random 10 numbers
+        # that are < 10 and >= 0.
+        randomlist = random.sample(range(10), 9)
+        postIINlist = [4, 0, 0, 0, 0, 0]
+        for i in range(numof):
+            x = random.choice(randomlist)
+            postIINlist.append(x)
+        postIINLuhn = list(postIINlist)
+        counterplace = 0
+        while counterplace < 15:
+            postIINLuhn[counterplace] *= 2
+            counterplace += 2
+        counter = 0
+        while counter < 15:
+            if postIINLuhn[counter] > 9:
+                postIINLuhn[counter] -= 9
+            counter += 1
+        sumof = sum(postIINLuhn)
+        CheckSumList = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+        checksumcounter = 0
+        while checksumcounter < 10:
+            if (sumof + CheckSumList[checksumcounter]) % 10 == 0:
+                postIINlist.append(CheckSumList[checksumcounter])
+                break
+            else:
+                checksumcounter += 1
+        # Transforming postIINlist into a single integer
+        global CardNumber
+        CardNumber = str(''.join(map(str, postIINlist)))
+        print("Your card number:")
+        print(CardNumber)
+        print("Your card PIN:")
+        #
+        # PIN production
+        #
+        # PIN has to be 4 numbers
+        pinLength = 4
+        randomPinlist = random.sample(range(10), 4)
+        # As requested in project PIN has to be in range of 0 and 9999
+        pinList = []
+        for i in range(pinLength):
+            x = random.choice(randomPinlist)
+            pinList.append(x)
+        pin = str(''.join(map(str, pinList)))
+        # Matching CardNumber with the PIN
+        print(pin)
+        #
+        # Updating DB with card and pin
+        #
+        cur.execute(f"INSERT INTO card (number, pin) VALUES ({CardNumber}, {pin})")
+        conn.commit()
+
+
+def luhn_checksum(card_number):
+    def digits_of(n):
+        return [int(d) for d in str(n)]
+
+    digits = digits_of(card_number)
+    odd_digits = digits[-1::-2]
+    even_digits = digits[-2::-2]
+    checksum = 0
+    checksum += sum(odd_digits)
+    for d in even_digits:
+        checksum += sum(digits_of(d * 2))
+    return checksum % 10
+
+def account_check(account):
+    cur.execute(f"SELECT number, pin FROM card WHERE number={account}")
+    accountNu = cur.fetchall()
+    return accountNu
+
+def balance_check(account):
+    cur.execute(f"SELECT balance FROM card WHERE number={account}")
+    # adding extra variable and referencing the first value to avoid tuples, ie. []
+    balance = cur.fetchone()
+    return balance[0]
+
+
+
+while True:
+    print("""1. Create an account
+2. Log into account
+0. Exit
+    """)
+    answer = input(">")
+    if answer == "1":
+        print()
+        print("Your card has been created")
+        CardPinGenerator()
+        print()
+    elif answer == "0":
+        print()
+        print("Bye!")
+        cur.close()
+        exit()
+    elif answer == "2":
+        print()
+        print("Enter your card number:")
+        UserAccount = str(input(">"))
+        print("Enter your PIN:")
+        UserPin = str(input(">"))
+        cur.execute(f"SELECT number, pin FROM card WHERE number={UserAccount} AND pin={UserPin}")
+        check = cur.fetchall()
+        # cur.execute("SELECT * FROM card")
+        # table = cur.fetchall()
+        # for x in table:
+        #  print(x)
+
+        if check:
+            print()
+            print("You have successfully logged in!")
+            print()
+
+            while True:
+                print("""1. Balance
+2. Add income
+3. Do transfer
+4. Close account
+5. Log out
+0. Exit
+                """)
+                print()
+                answerAccount = input(">")
+                if answerAccount == "1":
+                    print()
+                    Balance = balance_check(UserAccount)
+                    print(f"Balance: {Balance}")
+                    print()
+                elif answerAccount == "2":
+                    print()
+                    print("Enter income:")
+                    AddedIncome = int(input(">"))
+                    Balance = balance_check(f"{UserAccount}")
+                    UpdatedBalance = int(Balance) + int(AddedIncome)
+                    cur.execute(f"UPDATE card SET balance = {UpdatedBalance} WHERE number={UserAccount}")
+                    conn.commit()
+                    print("Income was added!")
+                    print()
+                elif answerAccount == "3":
+                    print()
+                    print("Transfer")
+                    print("Enter card number:")
+                    Acc2transfer = str(input(">"))
+                    if luhn_checksum(Acc2transfer) == 0 and account_check(Acc2transfer):
+                        print("Enter how much money you want to transfer:")
+                        transfer_amt = int(input(">"))
+                        if transfer_amt > int(balance_check(UserAccount)):
+                            print("Not enough money!")
+                            print("")
+                        else:
+                            sender_balance = int(balance_check(UserAccount)) - transfer_amt
+                            cur.execute(f"UPDATE card SET balance = {sender_balance} WHERE number={UserAccount}")
+                            receiver_balance = int(balance_check(Acc2transfer)) + transfer_amt
+                            cur.execute(f"UPDATE card SET balance = {receiver_balance} WHERE number={Acc2transfer}")
+                            conn.commit()
+                            print("Success!")
+                            print()
+                    elif luhn_checksum(Acc2transfer) == 0:
+                        print("Such a card does not exist.")
+                        print()
+                    else:
+                        print("Probably you made a mistake in the card number. Please try again!")
+                        print()
+
+                elif answerAccount == "4":
+                    cur.execute(f"DELETE FROM card WHERE  number={UserAccount}")
+                    conn.commit()
+                    print()
+                    print("The account has been closed!")
+                    break
+
+                elif answerAccount == "0":
+                    print()
+                    print("Bye!")
+                    cur.close()
+                    exit()
+                elif answerAccount == "5":
+                    print()
+                    print("You have successfully logged out!")
+                    print()
+                    break
+        else:
+            print()
+            print("Wrong card number or PIN!")
+            print()
